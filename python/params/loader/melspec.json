@@ -1,0 +1,6 @@
+{
+    "loader_type": "PrecomputedMelSpecLoader",
+    "loader_params": {
+        "root_dir":"/home/alex/hdd/study/genres_feat"
+    }
+}
