@@ -19,6 +19,7 @@ class CBankGRUModel(object):
                  postproc_filters=128,
                  out_classes=10,
                  use_state=False,
+                 dropout_rate=0.5,
                  is_training=True):
         '''Args:
             horizontal_kernel_sizes -> list of int - kernel_size for 1D
@@ -30,7 +31,11 @@ class CBankGRUModel(object):
             conv_keep_prob -> float - dropout strength on convolutions
             use_batch_norm -> bool - whether to use batch norm
             num_gru_units -> int - number of GRU units in a single direction
-            out_classes -> int - number of classes to predict'''
+            out_classes -> int - number of classes to predict
+            use_state -> bool - whether to use state of rnn for prediction
+            dropout_rate -> float - dropout on 2 last FC channels
+            batch_norm -> bool - whether to use batch norm
+            is_training -> bool or bool tensor - training phase'''
         self.horizontal_kernel_sizes = horizontal_kernel_sizes
         self.horizontal_dilations = horizontal_dilations
         self.horizontal_filters = horizontal_filters
@@ -45,9 +50,15 @@ class CBankGRUModel(object):
         self.postproc_filters = postproc_filters
         self.out_classes = out_classes
         self.use_state = use_state
+        self.dropout_rate = dropout_rate
         self.is_training = is_training
 
     def create_model(self, input_tensor):
+        # Just hack to avoid explicit zero-mean 1-std normalization
+        if self.use_batch_norm:
+            input_tensor = tf.layers.batch_normalization(
+                input_tensor,
+                training=self.is_training)
         out = input_tensor
 
         with tf.variable_scope('horizontal_stack', reuse=tf.AUTO_REUSE):
@@ -71,8 +82,16 @@ class CBankGRUModel(object):
                                           strides=(1, 1),
                                           padding='same',
                                           dilation_rate=(1, dilation),
-                                          activation=tf.nn.relu,
+                                          activation=None,
                                           name='h_stack_conv_{}'.format(i))
+                if self.use_batch_norm:
+                    conved = tf.layers.batch_normalization(
+                        conved,
+                        training=self.is_training)
+                conved = tf.nn.relu(conved)
+                conved = tf.layers.dropout(conved,
+                                           rate=self.conv_keep_prob,
+                                           training=self.is_training)
                 self.h_stack.append(conved)
             self.h_stacked = tf.concat(self.h_stack, 3) + out_proj
             out = self.h_stacked
@@ -97,8 +116,16 @@ class CBankGRUModel(object):
                                           strides=(1, 1),
                                           padding='same',
                                           dilation_rate=(dilation, 1),
-                                          activation=tf.nn.relu,
+                                          activation=None,
                                           name='v_stack_conv_{}'.format(i))
+                if self.use_batch_norm:
+                    conved = tf.layers.batch_normalization(
+                        conved,
+                        training=self.is_training)
+                conved = tf.nn.relu(conved)
+                conved = tf.layers.dropout(conved,
+                                           self.conv_keep_prob,
+                                           training=self.is_training)
                 self.v_stack.append(conved)
             self.v_stacked = tf.concat(self.v_stack, 3) + out_proj
             out = self.v_stacked
@@ -120,10 +147,16 @@ class CBankGRUModel(object):
                 proj_inp = self.gru_out
 
         with tf.variable_scope('postproc', reuse=tf.AUTO_REUSE):
+            proj_inp = tf.layers.dropout(proj_inp,
+                                         self.dropout_rate,
+                                         training=self.is_training)
             output = tf.layers.dense(proj_inp,
                                      self.postproc_filters,
                                      activation=tf.nn.relu,
                                      name='postproc1')
+            output = tf.layers.dropout(output,
+                                       self.dropout_rate,
+                                       training=self.is_training)
             output = tf.layers.dense(output,
                                      self.out_classes,
                                      activation=tf.nn.relu,

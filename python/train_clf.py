@@ -73,7 +73,10 @@ if __name__ == '__main__':
     sums_op = tf.summary.merge([acc_sum, loss_sum])
     test_sums_op = tf.summary.merge([test_acc_sum, test_loss_sum])
     optimizer = tf.train.AdamOptimizer(args.lr)
-    opt = optimizer.minimize(loss)
+
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+        opt = optimizer.minimize(loss)
 
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())

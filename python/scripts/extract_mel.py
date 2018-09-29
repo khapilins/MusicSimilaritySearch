@@ -5,6 +5,7 @@ import argparse
 import sys
 from utils import find_files
 
+
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str, required=True,
@@ -29,7 +30,11 @@ def get_args():
 
 if __name__ == '__main__':
     args = get_args()
-    files = find_files(args.data_dir, '.wav|.au|.mp3|.flac')
+    # TODO: It's messy and should be changed
+    files = find_files(args.data_dir, '*.ogg')
+    filese += find_files(args.data_dir, '*.wav')
+    files += find_files(args.data_dir, '*.au')
+    files += find_files(args.data_dir, '*.mp3')
 
     files = list(map(os.path.normpath, files))
     root_folder = os.path.commonpath(files)

@@ -109,6 +109,7 @@ class PrecomputedMelSpecLoader(BaseLoader):
     def __init__(self,
                  root_dir,
                  genres=None,
+                 recorded_feat_root_folder=None,
                  sr=22050,
                  n_mel=80,
                  n_fft=2048,
@@ -126,6 +127,17 @@ class PrecomputedMelSpecLoader(BaseLoader):
             n_fft -> int - number of fft bins
             hop_size -> int - fft hop_size'''
         super().__init__(root_dir, '*.au.npz', test_size, random_seed)
+        self.recorded_feat_root_folder = recorded_feat_root_folder
+        if self.recorded_feat_root_folder is not None:
+            self.additional_train_files = [os.path.join(
+                recorded_feat_root_folder,
+                *f.split(os.sep)[-2:])[:-7] + '.au.ogg.npz' for f in self.train_files]
+            self.additional_test_files = [os.path.join(
+                recorded_feat_root_folder,
+                *f.split(os.sep)[-2:])[:-7] + '.au.ogg.npz' for f in self.test_files]
+            #import ipdb; ipdb.set_trace()
+            self.train_files.extend(self.additional_train_files)
+            #self.test_files.extend(self.additional_test_files)
         self.root_dir = root_dir
         self.genres = genres
         self.sr = sr
