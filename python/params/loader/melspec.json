@@ -1,7 +1,6 @@
 {
     "loader_type": "PrecomputedMelSpecLoader",
     "loader_params": {
-        "root_dir":"/home/alex/hdd/study/all_genres_feat/genres_feat",
-        "recorded_feat_root_folder": "/home/alex/hdd/study/all_genres_feat/genres_recorded_feat"
+        "root_dir":"/home/alex/hdd/study/all_genres_feat/genres_feat"
     }
 }

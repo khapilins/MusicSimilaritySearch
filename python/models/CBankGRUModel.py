@@ -2,7 +2,7 @@ import tensorflow as tf
 
 
 class CBankGRUModel(object):
-    '''Model, wich applies to input signal filterbank of horizontal convolutions,
+    '''Model, which applies to input signal filterbank of horizontal convolutions,
     then filterbank(s) of vertical (dilated) convolutions, and feeds the result
     to bidirectional GRU'''
 
@@ -20,6 +20,7 @@ class CBankGRUModel(object):
                  out_classes=10,
                  use_state=False,
                  dropout_rate=0.5,
+                 unidirectional=False,
                  is_training=True):
         '''Args:
             horizontal_kernel_sizes -> list of int - kernel_size for 1D
@@ -34,7 +35,6 @@ class CBankGRUModel(object):
             out_classes -> int - number of classes to predict
             use_state -> bool - whether to use state of rnn for prediction
             dropout_rate -> float - dropout on 2 last FC channels
-            batch_norm -> bool - whether to use batch norm
             is_training -> bool or bool tensor - training phase'''
         self.horizontal_kernel_sizes = horizontal_kernel_sizes
         self.horizontal_dilations = horizontal_dilations
@@ -51,6 +51,7 @@ class CBankGRUModel(object):
         self.out_classes = out_classes
         self.use_state = use_state
         self.dropout_rate = dropout_rate
+        self.unidirectional = unidirectional
         self.is_training = is_training
 
     def create_model(self, input_tensor):
@@ -89,9 +90,10 @@ class CBankGRUModel(object):
                         conved,
                         training=self.is_training)
                 conved = tf.nn.relu(conved)
-                conved = tf.layers.dropout(conved,
-                                           rate=self.conv_keep_prob,
-                                           training=self.is_training)
+                if self.conv_keep_prob < 1:
+                    conved = tf.layers.dropout(conved,
+                                               rate=self.conv_keep_prob,
+                                               training=self.is_training)
                 self.h_stack.append(conved)
             self.h_stacked = tf.concat(self.h_stack, 3) + out_proj
             out = self.h_stacked
@@ -123,28 +125,45 @@ class CBankGRUModel(object):
                         conved,
                         training=self.is_training)
                 conved = tf.nn.relu(conved)
-                conved = tf.layers.dropout(conved,
-                                           self.conv_keep_prob,
-                                           training=self.is_training)
+                if self.conv_keep_prob < 1:
+                    conved = tf.layers.dropout(conved,
+                                               self.conv_keep_prob,
+                                               training=self.is_training)
                 self.v_stack.append(conved)
             self.v_stacked = tf.concat(self.v_stack, 3) + out_proj
             out = self.v_stacked
-
+        self.zs = tf.squeeze(out, axis=[-2])
         with tf.variable_scope('BiGRU', reuse=tf.AUTO_REUSE):
             cell_fwd = tf.contrib.rnn.GRUCell(self.num_gru_units)
             cell_bwd = tf.contrib.rnn.GRUCell(self.num_gru_units)
             out = tf.squeeze(out, axis=[-2])
-            output, state = tf.nn.bidirectional_dynamic_rnn(cell_fwd,
-                                                            cell_bwd,
-                                                            out,
-                                                            swap_memory=True,
-                                                            dtype=tf.float32)
+            output, state = tf.nn.bidirectional_dynamic_rnn(
+                cell_fwd,
+                cell_bwd,
+                out,
+                swap_memory=True,
+                dtype=tf.float32)
             self.gru_out, self.state = (tf.concat(output, 2),
                                         tf.concat(state, 1))
             if self.use_state:
                 proj_inp = self.state[:, None, :]
             else:
                 proj_inp = self.gru_out
+        if self.unidirectional:
+            with tf.variable_scope('UniGRU', reuse=tf.AUTO_REUSE):
+                cell = tf.contrib.rnn.GRUCell(self.num_gru_units)
+                output, state = tf.nn.dynamic_rnn(cell,
+                                                  self.zs,
+                                                  swap_memory=True,
+                                                  dtype=tf.float32)
+                self.gru_out, self.state = output, state
+                if self.use_state:
+                    proj_inp = self.state[:, None, :]
+                else:
+                    proj_inp = self.gru_out
+
+                # For CPC; this is our auto-regressive output
+                self.cts = self.gru_out
 
         with tf.variable_scope('postproc', reuse=tf.AUTO_REUSE):
             proj_inp = tf.layers.dropout(proj_inp,

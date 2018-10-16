@@ -32,9 +32,6 @@ if __name__ == '__main__':
     args = get_args()
     # TODO: It's messy and should be changed
     files = find_files(args.data_dir, '*.ogg')
-    filese += find_files(args.data_dir, '*.wav')
-    files += find_files(args.data_dir, '*.au')
-    files += find_files(args.data_dir, '*.mp3')
 
     files = list(map(os.path.normpath, files))
     root_folder = os.path.commonpath(files)

@@ -1,5 +1,5 @@
 import os
-import fnmatch
+import re
 
 
 def find_files(directory, pattern):
@@ -7,6 +7,7 @@ def find_files(directory, pattern):
     files = []
     for root, dirnames, filenames in os.walk(directory,
                                              followlinks=True):
-        for filename in fnmatch.filter(filenames, pattern):
-            files.append(os.path.join(root, filename))
+        for filename in filenames:
+            if re.search(pattern, filename):
+                files.append(os.path.join(root, filename))
     return files

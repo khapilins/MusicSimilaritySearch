@@ -1,4 +1,8 @@
 {
     "model_type": "CBankGRUModel",
-    "model_params": {}
+    "model_params": {
+        "unidirectional": false,
+        "conv_keep_prob": 0.7,
+        "use_batch_norm": true
+    }
 }

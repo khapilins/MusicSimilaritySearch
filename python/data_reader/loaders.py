@@ -69,7 +69,8 @@ class WavToLogMelLoader(BaseLoader):
             n_mel -> int - number of mel filterbank
             n_fft -> int - number of fft bins
             hop_size -> int - fft hop_size'''
-        super().__init__(root_dir, '*.au', test_size, random_seed)
+        super().__init__(root_dir, r'\.(au|wav|ogg|mp3)',
+                         test_size, random_seed)
         self.root_dir = root_dir
         self.genres = genres
         self.sr = sr
@@ -126,7 +127,8 @@ class PrecomputedMelSpecLoader(BaseLoader):
             n_mel -> int - number of mel filterbank
             n_fft -> int - number of fft bins
             hop_size -> int - fft hop_size'''
-        super().__init__(root_dir, '*.au.npz', test_size, random_seed)
+        super().__init__(root_dir, r'\.(au.npz|wav.npz|ogg.npz|mp3.npz)',
+                         test_size, random_seed)
         self.recorded_feat_root_folder = recorded_feat_root_folder
         if self.recorded_feat_root_folder is not None:
             self.additional_train_files = [os.path.join(
