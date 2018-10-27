@@ -116,7 +116,7 @@ class PrecomputedMelSpecLoader(BaseLoader):
                  n_fft=2048,
                  hop_size=660,
                  test_size=0.2,
-                 random_seed=None):
+                 random_seed=42):
         ''' Args:
             root_dir -> str - directory to scan for .au files
                 (GTZAN dataset file format)
@@ -137,7 +137,6 @@ class PrecomputedMelSpecLoader(BaseLoader):
             self.additional_test_files = [os.path.join(
                 recorded_feat_root_folder,
                 *f.split(os.sep)[-2:])[:-7] + '.au.ogg.npz' for f in self.test_files]
-            #import ipdb; ipdb.set_trace()
             self.train_files.extend(self.additional_train_files)
             #self.test_files.extend(self.additional_test_files)
         self.root_dir = root_dir
@@ -167,3 +166,48 @@ class PrecomputedMelSpecLoader(BaseLoader):
         one_hot[genre_id] = 1
         return (mel_spec.astype(np.float32),
                 one_hot)
+
+
+class WaveformLoader(BaseLoader):
+    '''It's actuallly really slow'''
+    def __init__(self,
+                 folder,
+                 sr=22050,
+                 test_size=0.2,
+                 random_seed=42):
+        super().__init__(folder, r'\.(wav|mp3|ogg|flac|au)',
+                         test_size=test_size,
+                         random_seed=random_seed)
+        self.sr = sr
+
+    def get_types(self):
+        return (tf.float32, tf.string)
+
+    def get_shapes(self):
+        return ([None, 1], tuple())
+
+    def load(self, path):
+        au, _ = librosa.load(path, sr=self.sr)
+        return (au[:, None],
+                path.split(os.sep)[-1])
+
+
+class NpzWaveformLoader(BaseLoader):
+    def __init__(self,
+                 folder,
+                 test_size=0.2,
+                 random_seed=42):
+        super().__init__(folder, r'\.(npz)',
+                         test_size=test_size,
+                         random_seed=random_seed)
+
+    def get_types(self):
+        return (tf.float32, tf.string)
+
+    def get_shapes(self):
+        return ([None, 1], tuple())
+
+    def load(self, path):
+        au = np.load(path)['au']
+        return (au[:, None],
+                path.split(os.sep)[-1])

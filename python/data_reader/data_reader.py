@@ -26,8 +26,14 @@ def create_data_reader(loader,
             output_types=tuple(loader.get_types())).prefetch(prefetch)
 
         if augmentations is not None:
-            for aug in augmentations:
+            for aug in augmentations['train']:
                 dataset = dataset.map(
+                    aug,
+                    num_parallel_calls=num_parallel_calls)
+
+        if augmentations is not None:
+            for aug in augmentations['test']:
+                dataset_test = dataset_test.map(
                     aug,
                     num_parallel_calls=num_parallel_calls)
 
@@ -43,4 +49,4 @@ def create_data_reader(loader,
         train_init_op = iterator.make_initializer(dataset)
         test_init_op = iterator.make_initializer(dataset_test)
 
-        return (next_element, train_init_op, test_init_op)
+        return (next_element, train_init_op, test_init_op, None)

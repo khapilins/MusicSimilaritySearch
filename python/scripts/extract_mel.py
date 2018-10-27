@@ -4,6 +4,10 @@ import os
 import argparse
 import sys
 from utils import find_files
+from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from joblib import Parallel, delayed
+import multiprocessing as mp
 
 
 def get_args():
@@ -24,20 +28,15 @@ def get_args():
                         help='Value to clip small values in spectrogram'
                         ' before applying log')
     parser.add_argument('--dry_run', action='store_true')
+    parser.add_argument('--n_jobs', type=int, default=8)
 
     args = parser.parse_args()
     return args
 
-if __name__ == '__main__':
-    args = get_args()
-    # TODO: It's messy and should be changed
-    files = find_files(args.data_dir, '*.ogg')
 
-    files = list(map(os.path.normpath, files))
-    root_folder = os.path.commonpath(files)
-
-    for i, f in enumerate(files):
-        au, st = librosa.load(f, sr=args.sr)
+def extract_and_save(f):
+    try:
+        au, sr = librosa.load(f, sr=args.sr)
         au = librosa.util.normalize(au)
         mel_bank = librosa.filters.mel(args.sr, args.n_fft, args.n_mels)
         spec = np.abs(librosa.stft(au, args.n_fft, args.hop_size).T)**2
@@ -45,8 +44,6 @@ if __name__ == '__main__':
         log_spec = np.log(np.clip(spec, args.clip_before_log, None))
         log_mel = np.log(np.clip(mel_spec, args.clip_before_log, None))
 
-        sys.stdout.write('File {} out of {} \r'.format(i, len(files)))
-        sys.stdout.flush()
         if not args.dry_run:
             file_folder = os.path.join(args.out_dir, *f[len(root_folder):].split(os.sep)[:-1])
             os.makedirs(file_folder, exist_ok=True)
@@ -55,4 +52,18 @@ if __name__ == '__main__':
                      au=au,
                      log_spec=log_spec,
                      log_mel=log_mel)
+    except Exception as e:
+        print()
+        print(e)
+        print('File ' + f)
+
+
+if __name__ == '__main__':
+    args = get_args()
+    files = find_files(args.data_dir, r'\.(wav|mp3|ogg|flac|au)')
+
+    files = list(map(os.path.normpath, files))
+    root_folder = os.path.commonpath(files)
+
+    Parallel(n_jobs=args.n_jobs)(delayed(extract_and_save)(f) for f in tqdm(files))
     print('Done')

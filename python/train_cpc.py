@@ -10,6 +10,7 @@ from data_reader import create_data_reader, get_loader
 from utils import load, save
 import json
 import time
+from tqdm import tqdm
 
 
 def get_args():
@@ -37,7 +38,7 @@ def get_args():
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--test_batch_size', type=int, default=200)
-    parser.add_argument('--n_steps', type=int, default=int(1e6))
+    parser.add_argument('--n_steps', type=int, default=int(1e5))
     parser.add_argument('--n_losses', type=int, default=20,
                         help='Number of future-predicting losses')
     parser.add_argument('--crop_size', type=int, default=150,
@@ -45,10 +46,23 @@ def get_args():
     parser.add_argument('--l2_coeff', type=float, default=0,
                         help='L2 regularization for zs and cs embeddings '
                              'regularization')
+    parser.add_argument('--n_z_units', type=float, default=128,
+                        help='Number of units to project zs to before '
+                        'dot-product with cs')
+    parser.add_argument('--profile', action='store_true',
+                        help='If selected, will output informaiton about '
+                        'running time and memory into tensorboard graph '
+                        'view alongside with other summaries. (so it\'s also '
+                        'depends on --summaries_every. Note that it actually '
+                        'quite expensive and somewhat decreases overall '
+                        'perfomance even when not writing profiling info '
+                        'during current step. BTW it\'s also takes a lot of '
+                        'time to open in tensorboard as well')
+
     return parser.parse_args()
 
 
-def get_f_predictions(zs, cs, k, n_units=1):
+def get_f_predictions(zs, cs, k, n_units=128):
     # delete first k zs, to predict zs_t+k using c_t
     # delete last k cs, to match shapes
     with tf.variable_scope('f_prediction_' + str(k)):
@@ -63,34 +77,45 @@ def get_f_predictions(zs, cs, k, n_units=1):
         zs_shape = zs.get_shape().as_list()
         cs_shape = cs.get_shape().as_list()
 
-        prediction_layer = tf.layers.Dense(
+        prediction_layer1 = tf.layers.Dense(
             n_units,
-            activation=tf.exp,
-            name='f_prediction_layer_' + str(k))
-
-        f_pred = prediction_layer(zs_cs_concat)
+            activation=tf.nn.tanh,
+            name='f_prediction_layer1_' + str(k))
+        prediction_layer2 = tf.layers.Dense(
+            1,
+            name='f_prediction_layer2_' + str(k))
+        z_transformed = prediction_layer2(prediction_layer1(shifted_zs))
+        f_pred = tf.reduce_sum(
+            tf.multiply(z_transformed, shifted_cs), 2, keep_dims=True)
 
     with tf.variable_scope('contrastive_example_' + str(k)):
-        shuffled_zs = tf.concat((shifted_zs[1:, :, :],
-                                 shifted_zs[:1, :, :]),
-                                0)
-        shuffled_zs = tf.stop_gradient(shuffled_zs)
-        contr_concat = tf.stop_gradient(tf.concat(
-            (shuffled_zs, shifted_cs), 2))
-        contrastive_f_pred = prediction_layer(contr_concat)
+        z_contr_transformed = tf.concat((z_transformed[1:, :, :],
+                                         z_transformed[:1, :, :]),
+                                        0)
+        contr_f_pred = tf.reduce_sum(
+            tf.multiply(z_contr_transformed, shifted_cs), 2, keep_dims=True)
+        contrastive_f_pred = tf.reshape(contr_f_pred, [-1])
     with tf.variable_scope('accuracy_' + str(k)):
+        broadcasted_shape = (
+            tf.shape(f_pred)[0],
+            tf.shape(f_pred)[1],
+            tf.shape(contrastive_f_pred)[-1])
         acc = (tf.reduce_sum(
                 tf.where(
-                    tf.greater(f_pred, contrastive_f_pred),
-                    tf.ones_like(f_pred, dtype=tf.float32),
-                    tf.zeros_like(f_pred, dtype=tf.float32))) /
-               tf.reduce_prod(tf.cast(tf.shape(zs), tf.float32)))
+                    tf.math.greater(f_pred, contrastive_f_pred),
+                    tf.ones(broadcasted_shape, dtype=tf.float32),
+                    tf.zeros(broadcasted_shape, dtype=tf.float32))) /
+               tf.reduce_prod(tf.cast(broadcasted_shape, tf.float32)))
 
     return f_pred, contrastive_f_pred, acc
 
 
 def crop_inputs(im, size):
-    return tf.random_crop(im, [size, tf.shape(im)[-1]])
+    return tf.cond(
+        tf.greater(tf.shape(im)[0], size),
+        lambda: tf.random_crop(im, [size, tf.shape(im)[-1]]),
+        lambda: tf.convert_to_tensor(im, tf.float32))
+
 
 if __name__ == '__main__':
     args = get_args()
@@ -106,11 +131,14 @@ if __name__ == '__main__':
     if args.crop_size > 0:
         def crop_fn(im, *args_):
             return (crop_inputs(im, args.crop_size), *args_)
-        (next_element, labels), train_data_init_op, test_data_init_op = (
+        augmentations = {'train': [crop_fn], 'test': [crop_fn]}
+        ((next_element, metadata_labels), train_data_init_op,
+         test_data_init_op, processes) = (
             create_data_reader(loader, args.batch_size, args.test_batch_size,
-                               [crop_fn]))
+                               augmentations))
     else:
-        (next_element, labels), train_data_init_op, test_data_init_op = (
+        ((next_element, metadata_labels), train_data_init_op,
+         test_data_init_op, processes) = (
             create_data_reader(loader, args.batch_size, args.test_batch_size))
 
     next_element = tf.expand_dims(next_element, axis=2)
@@ -131,12 +159,25 @@ if __name__ == '__main__':
         with tf.name_scope('loss_' + str(i)):
             f_pred, contrastive_f_pred, acc = get_f_predictions(
                 model.zs, model.cts, i)
-            loss = -tf.reduce_mean(
-                tf.log(f_pred/tf.reduce_sum(contrastive_f_pred, axis=0)))
 
             pred_shape = tf.shape(f_pred)
-            batch = tf.cast(pred_shape[0], tf.float32)
+            batch_size = tf.cast(pred_shape[0], tf.float32)
+            batch = batch_size
             time_steps = tf.cast(pred_shape[1], tf.float32)
+
+            contrastive_f_pred = tf.reshape(
+                tf.tile(contrastive_f_pred, [pred_shape[0]]),
+                (batch_size, time_steps, -1))
+
+            labels = tf.reshape(
+                tf.tile(
+                    tf.concat(([1], tf.zeros((batch_size, ))), 0),
+                    [pred_shape[0] * pred_shape[1]]),
+                (batch_size, pred_shape[1], -1))
+            logits = tf.concat((f_pred, contrastive_f_pred), 2)
+            loss = tf.reduce_mean(
+                tf.nn.softmax_cross_entropy_with_logits_v2(
+                    labels=labels, logits=logits, dim=2))
             MI = (tf.log(time_steps) - loss) / batch
 
             losses_summary.append(tf.summary.scalar('loss_k_' + str(i), loss))
@@ -207,20 +248,37 @@ if __name__ == '__main__':
     saver = tf.train.Saver()
     ckpt_step = load(saver, sess, args.logdir, args.ckpt)
 
-    for i in range(ckpt_step, args.n_steps):
+    pbar = tqdm(range(ckpt_step, args.n_steps))
+    for i in pbar:
         try:
-            step_start = time.time()
+            if args.profile and i % args.summaries_every == 0:
+                run_metadata = tf.RunMetadata()
+                options = tf.RunOptions(
+                    trace_level=tf.RunOptions.FULL_TRACE,
+                    report_tensor_allocations_upon_oom=True)
+            else:
+                run_metadata = None
+                options = None
             loss_, mean_MI_, sums, zs, cs, ls, _ = sess.run([
                 total_loss,
                 mean_MI,
                 sums_op,
                 model.zs,
                 model.cts,
-                labels,
-                opt])
-            step_time = time.time() - step_start
-            print('Step:{}. Elapsed:{:.3f}. Loss: {:.3f}, MI: {:.3f}'
-                  .format(i, step_time, loss_, mean_MI_))
+                metadata_labels,
+                opt],
+                run_metadata=run_metadata,
+                options=options)
+            pbar.set_description(
+                'Loss: {:.3f}, MI: {:.3f}'
+                  .format(loss_, mean_MI_))
+
+            if i % args.summaries_every == 0:
+                writer.add_summary(sums, i)
+                if args.profile:
+                    writer.add_run_metadata(
+                        run_metadata, 'run_meta_step_' + str(i), i)
+
             if i % args.test_every == 0:
                 sess.run(test_data_init_op)
                 loss_, mean_MI_, sums, tzs, tcs, tls = sess.run([
@@ -229,20 +287,18 @@ if __name__ == '__main__':
                     test_sums_op,
                     model.zs,
                     model.cts,
-                    labels])
+                    metadata_labels])
                 print('Test loss: {:3f}, test MI: {:3f}'.
                       format(loss_, mean_MI_))
                 writer.add_summary(sums, i)
                 sess.run(train_data_init_op)
             if i % args.save_every == 0:
                 save(saver, sess, args.logdir, i)
-            if i % args.summaries_every:
-                writer.add_summary(sums, i)
+
             if i % args.embeddings_every == 0:
-                # not sure if it's ok to take mean
                 print('Saving projections')
-                tzs = np.squeeze(np.mean(tzs, axis=1))
-                tcs = np.squeeze(np.mean(tcs, axis=1))
+                tzs = np.squeeze(tzs[:, tzs.shape[1]//2])
+                tcs = np.squeeze(tcs[:, tcs.shape[1]//2])
                 tls = [loader.genres[np.argmax(l)] for l in tls]
                 writerX.add_embedding(tzs,
                                       metadata=tls,

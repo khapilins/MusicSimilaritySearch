@@ -100,7 +100,7 @@ if __name__ == '__main__':
                 sess.run(train_data_init_op)
             if i % args.save_every == 0:
                 save(saver, sess, args.logdir, i)
-            if i % args.summaries_every:
+            if i % args.summaries_every == 0:
                 writer.add_summary(sums, i)
         except KeyboardInterrupt as e:
             print('Interrupted...')
