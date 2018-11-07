@@ -5,6 +5,8 @@ import os
 import sys
 import fnmatch
 import random
+import pandas as pd
+import h5py
 
 sys.path.append(os.path.join(sys.path[1], os.path.abspath('../')))
 
@@ -211,3 +213,92 @@ class NpzWaveformLoader(BaseLoader):
         au = np.load(path)['au']
         return (au[:, None],
                 path.split(os.sep)[-1])
+
+
+class PathLoader(BaseLoader):
+    def __init__(self,
+                 folder,
+                 file_ext,
+                 fma_meta_path=None,
+                 gtzan_meta=False,
+                 test_size=0.2,
+                 random_seed=42,
+                 **kwargs):
+        self.fma_meta_path = fma_meta_path
+        self.fma_meta = None
+        if self.fma_meta_path is not None:
+            self.fma_meta = pd.read_csv(
+                os.path.join(self.fma_meta_path, 'tracks.csv'),
+                header=[0, 1],
+                index_col=0)['track']
+        self.gtzan_meta = gtzan_meta
+        return super().__init__(folder, file_ext, test_size, random_seed)
+
+    def get_types(self):
+        return {'path': tf.string,
+                'metadata': tf.string}
+
+    def get_shapes(self):
+        return {'path': [],
+                'metadata': []}
+
+    def load(self, path):
+        genre = 'N/A'
+        if self.fma_meta is not None:
+            track_id = path.split(os.sep)[-1].split('.')[0]
+            try:
+                genre = self.fma_meta.loc[int(track_id)]['genre_top']
+            except Exception as e:
+                genre = 'N/A'
+        return {'path': path,
+                'metadata': genre}
+
+
+class H5WaveformLoader(BaseLoader):
+    def __init__(self,
+                 folder,
+                 file_ext,
+                 crop_size=None,
+                 fma_meta_path=None,
+                 gtzan_meta=False,
+                 test_size=0.2,
+                 random_seed=42,
+                 **kwargs):
+        self.fma_meta_path = fma_meta_path
+        self.fma_meta = None
+        self.crop_size = crop_size
+        if self.fma_meta_path is not None:
+            self.fma_meta = pd.read_csv(
+                os.path.join(self.fma_meta_path, 'tracks.csv'),
+                header=[0, 1],
+                index_col=0)['track']
+        self.gtzan_meta = gtzan_meta
+        return super().__init__(folder, file_ext, test_size, random_seed)
+
+    def get_types(self):
+        return {'path': tf.string,
+                'clean_batch': tf.float32,
+                'metadata': tf.string}
+
+    def get_shapes(self):
+        return {'path': [],
+                'clean_batch': (None, 1),
+                'metadata': []}
+
+    def load(self, path):
+        with h5py.File(path, 'r') as f:
+            if self.crop_size is None or self.crop_size > f['au'].shape[0]:
+                au = f['au'][:]
+            else:
+                start = random.randint(0, f['au'].shape[0] - self.crop_size)
+                au = f['au'][start: start + self.crop_size]
+        genre = 'N/A'
+        if self.fma_meta is not None:
+            track_id = path.split(os.sep)[-1].split('.')[0]
+            try:
+                genre = self.fma_meta.loc[int(track_id)]['genre_top']
+            except Exception as e:
+                genre = 'N/A'
+        return {'path': path,
+                'clean_batch': au[:, None],
+                'metadata': genre}

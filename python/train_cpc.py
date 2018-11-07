@@ -6,7 +6,7 @@ import tensorflow as tf
 from tensorboardX import SummaryWriter
 import argparse
 from models import get_model
-from data_reader import create_data_reader, get_loader
+from data_reader import create_data_reader, get_loader, get_augmentation
 from utils import load, save
 import json
 import time
@@ -38,11 +38,9 @@ def get_args():
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--test_batch_size', type=int, default=200)
-    parser.add_argument('--n_steps', type=int, default=int(1e5))
+    parser.add_argument('--n_steps', type=int, default=int(1e5) + 1)
     parser.add_argument('--n_losses', type=int, default=20,
                         help='Number of future-predicting losses')
-    parser.add_argument('--crop_size', type=int, default=150,
-                        help='Random crop inputs to this amount of frames')
     parser.add_argument('--l2_coeff', type=float, default=0,
                         help='L2 regularization for zs and cs embeddings '
                              'regularization')
@@ -128,18 +126,26 @@ if __name__ == '__main__':
     model = get_model(model_params['model_type'])(
         **model_params['model_params'])
 
-    if args.crop_size > 0:
-        def crop_fn(im, *args_):
-            return (crop_inputs(im, args.crop_size), *args_)
-        augmentations = {'train': [crop_fn], 'test': [crop_fn]}
-        ((next_element, metadata_labels), train_data_init_op,
-         test_data_init_op, processes) = (
-            create_data_reader(loader, args.batch_size, args.test_batch_size,
-                               augmentations))
+    train_augmentations, test_augmentations = [], []
+    if loader_params.get('augmentations', None):
+        for aug in loader_params['augmentations']['train']:
+            train_augmentations.append(
+                get_augmentation(aug[0])(**aug[1]))
+        for aug in loader_params['augmentations']['test']:
+            test_augmentations.append(
+                get_augmentation(aug[0])(**aug[1]))
+        augmentations = {'train': train_augmentations,
+                         'test': test_augmentations}
     else:
-        ((next_element, metadata_labels), train_data_init_op,
-         test_data_init_op, processes) = (
-            create_data_reader(loader, args.batch_size, args.test_batch_size))
+        augmentations = None
+
+    reader, train_data_init_op, test_data_init_op = create_data_reader(
+        loader, args.batch_size, args.test_batch_size,
+        augmentations=augmentations)
+
+    next_element = reader['clean_batch']
+    next_element_aug = reader.get('aug_batch', None)
+    metadata_labels = reader.get('metadata', reader['path'])
 
     next_element = tf.expand_dims(next_element, axis=2)
 
@@ -271,7 +277,7 @@ if __name__ == '__main__':
                 options=options)
             pbar.set_description(
                 'Loss: {:.3f}, MI: {:.3f}'
-                  .format(loss_, mean_MI_))
+                .format(loss_, mean_MI_))
 
             if i % args.summaries_every == 0:
                 writer.add_summary(sums, i)
@@ -299,7 +305,6 @@ if __name__ == '__main__':
                 print('Saving projections')
                 tzs = np.squeeze(tzs[:, tzs.shape[1]//2])
                 tcs = np.squeeze(tcs[:, tcs.shape[1]//2])
-                tls = [loader.genres[np.argmax(l)] for l in tls]
                 writerX.add_embedding(tzs,
                                       metadata=tls,
                                       global_step=i,

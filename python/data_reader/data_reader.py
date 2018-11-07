@@ -19,11 +19,11 @@ def create_data_reader(loader,
 
         dataset = tf.data.Dataset.from_generator(
             generator=lambda: gen('train'),
-            output_types=tuple(loader.get_types())).prefetch(prefetch)
+            output_types=loader.get_types()).prefetch(prefetch)
 
         dataset_test = tf.data.Dataset.from_generator(
             generator=lambda: gen('test'),
-            output_types=tuple(loader.get_types())).prefetch(prefetch)
+            output_types=loader.get_types()).prefetch(prefetch)
 
         if augmentations is not None:
             for aug in augmentations['train']:
@@ -36,10 +36,14 @@ def create_data_reader(loader,
                 dataset_test = dataset_test.map(
                     aug,
                     num_parallel_calls=num_parallel_calls)
+        if augmentations:
+            shapes = dataset.output_shapes
+        else:
+            shapes = loader.get_shapes()
 
-        dataset = dataset.padded_batch(batch_size, loader.get_shapes())
+        dataset = dataset.padded_batch(batch_size, shapes)
         dataset_test = dataset_test.padded_batch(test_batch_size,
-                                                 loader.get_shapes())
+                                                 shapes)
 
         iterator = tf.data.Iterator.from_structure(dataset.output_types,
                                                    dataset.output_shapes)
@@ -49,4 +53,4 @@ def create_data_reader(loader,
         train_init_op = iterator.make_initializer(dataset)
         test_init_op = iterator.make_initializer(dataset_test)
 
-        return (next_element, train_init_op, test_init_op, None)
+        return (next_element, train_init_op, test_init_op)

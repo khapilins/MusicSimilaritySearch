@@ -1,5 +1,6 @@
 import librosa
 import numpy as np
+import h5py
 import os
 import argparse
 import sys
@@ -45,13 +46,15 @@ def extract_and_save(f):
         log_mel = np.log(np.clip(mel_spec, args.clip_before_log, None))
 
         if not args.dry_run:
-            file_folder = os.path.join(args.out_dir, *f[len(root_folder):].split(os.sep)[:-1])
+            file_folder = os.path.join(
+                args.out_dir, *f[len(root_folder):].split(os.sep)[:-1])
             os.makedirs(file_folder, exist_ok=True)
-            file_name = f.split(os.sep)[-1]
-            np.savez(os.path.join(file_folder, file_name),
-                     au=au,
-                     log_spec=log_spec,
-                     log_mel=log_mel)
+            file_name = f.split(os.sep)[-1] + '.h5'
+            f_path = os.path.join(file_folder, file_name)
+            with h5py.File(f_path, 'w') as h5_file:
+                h5_file.create_dataset('au', data=au)
+                h5_file.create_dataset('log_spec', data=log_spec)
+                h5_file.create_dataset('log_mel', data=log_mel)
     except Exception as e:
         print()
         print(e)
@@ -65,5 +68,6 @@ if __name__ == '__main__':
     files = list(map(os.path.normpath, files))
     root_folder = os.path.commonpath(files)
 
-    Parallel(n_jobs=args.n_jobs)(delayed(extract_and_save)(f) for f in tqdm(files))
+    Parallel(n_jobs=args.n_jobs)(
+        delayed(extract_and_save)(f) for f in tqdm(files))
     print('Done')
