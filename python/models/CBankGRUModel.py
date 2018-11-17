@@ -173,6 +173,8 @@ class CBankGRUModel(object):
                                      self.postproc_filters,
                                      activation=tf.nn.relu,
                                      name='postproc1')
+            # for classification embeddings
+            self.dense_out = output
             output = tf.layers.dropout(output,
                                        self.dropout_rate,
                                        training=self.is_training)

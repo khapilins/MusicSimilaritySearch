@@ -1,8 +1,8 @@
 {
     "loader_type": "H5FeatureLoader",
     "loader_params": {
-        "folder":"/home/alex/hdd/study/all_genres_feat/",
-        "gtzan_labels": true,
+        "folder": "/home/alex/hdd/study/fma_small_feat",
+        "fma_meta_path": "/home/alex/hdd/study/fma_metadata",
         "crop_size": 200,
         "feature_type": "log_mel"
     }

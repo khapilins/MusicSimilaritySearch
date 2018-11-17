@@ -3,7 +3,7 @@
     "loader_params": {
         "folder":"/home/alex/hdd/study/all_genres_feat/",
         "gtzan_labels": true,
-        "crop_size": 200,
-        "feature_type": "log_mel"
+        "crop_size": 22050,
+        "feature_type": "au"
     }
 }

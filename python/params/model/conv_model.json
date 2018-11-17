@@ -1,0 +1,10 @@
+{
+    "model_type": "ConvModel",
+    "model_params": {
+        "filters": 128,
+        "num_gru_units": 128,
+        "use_batch_norm": false,
+        "conv_keep_prob": 1,
+        "proj_before_gru": 128
+    }
+}

@@ -6,8 +6,8 @@ import argparse
 import sys
 from utils import find_files
 from tqdm import tqdm
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from joblib import Parallel, delayed
+from sklearn.model_selection import train_test_split
 import multiprocessing as mp
 
 
@@ -21,13 +21,15 @@ def get_args():
                         help='Number of mel bands')
     parser.add_argument('--sr', type=int, default=22050,
                         help='Sample rate')
-    parser.add_argument('--n_fft', type=int, default=2048,
+    parser.add_argument('--n_fft', type=int, default=800,
                         help='Number of fft bins')
-    parser.add_argument('--hop_size', type=int, default=660,
+    parser.add_argument('--hop_size', type=int, default=220,
                         help='Hop size for FFT in samples')
     parser.add_argument('--clip_before_log', type=float, default=0.0001,
                         help='Value to clip small values in spectrogram'
                         ' before applying log')
+    parser.add_argument('--test_size', type=float, default=0.2,
+                        help='Test size or fraction for train/test split')
     parser.add_argument('--dry_run', action='store_true')
     parser.add_argument('--n_jobs', type=int, default=8)
 
@@ -55,6 +57,7 @@ def extract_and_save(f):
                 h5_file.create_dataset('au', data=au)
                 h5_file.create_dataset('log_spec', data=log_spec)
                 h5_file.create_dataset('log_mel', data=log_mel)
+            processed_files.append(f_path)
     except Exception as e:
         print()
         print(e)
@@ -63,11 +66,25 @@ def extract_and_save(f):
 
 if __name__ == '__main__':
     args = get_args()
+    manager = mp.Manager()
     files = find_files(args.data_dir, r'\.(wav|mp3|ogg|flac|au)')
+    processed_files = manager.list([])
 
-    files = list(map(os.path.normpath, files))
+    files = manager.list(map(os.path.normpath, files))
     root_folder = os.path.commonpath(files)
 
     Parallel(n_jobs=args.n_jobs)(
         delayed(extract_and_save)(f) for f in tqdm(files))
+    if not args.dry_run:
+        print('Making train/test split')
+        train, test = train_test_split(processed_files,
+                                       test_size=args.test_size)
+        with open(os.path.join(args.out_dir, 'train.txt'), 'w') as f:
+            for f_name in train:
+                f.write(f_name + os.linesep)
+        with open(os.path.join(args.out_dir, 'test.txt'), 'w') as f:
+            for f_name in test:
+                f.write(f_name + os.linesep)
+        with open(os.path.join(args.out_dir, 'args.txt'), 'w') as f:
+            f.write(str(args))
     print('Done')

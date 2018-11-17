@@ -1,0 +1,9 @@
+{
+    "loader_type": "H5FeatureLoader",
+    "loader_params": {
+        "folder": "/home/alex/hdd/study/fma_small_feat",
+        "fma_meta_path": "/home/alex/hdd/study/fma_metadata",
+        "crop_size": 22050,
+        "feature_type": "au"
+    }
+}

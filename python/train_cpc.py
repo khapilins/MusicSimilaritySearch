@@ -56,6 +56,11 @@ def get_args():
                         'perfomance even when not writing profiling info '
                         'during current step. BTW it\'s also takes a lot of '
                         'time to open in tensorboard as well')
+    parser.add_argument('--restore_from', type=str, default='',
+                        help='Allows to restore model from different '
+                        'checkpoint without using CPC specific layers. It is '
+                        'useful if, for example, you want to finetune model '
+                        'after classification')
 
     return parser.parse_args()
 
@@ -253,6 +258,13 @@ if __name__ == '__main__':
     sess.run(train_data_init_op)
     saver = tf.train.Saver()
     ckpt_step = load(saver, sess, args.logdir, args.ckpt)
+    if args.restore_from:
+        vars = [v for v in tf.global_variables()
+                if 'loss_' not in v.name and
+                'f_prediction' not in v.name]
+        saver = tf.train.Saver(vars)
+        ckpt_step = load(saver, sess, args.restore_from, args.ckpt)
+        saver = tf.train.Saver()
 
     pbar = tqdm(range(ckpt_step, args.n_steps))
     for i in pbar:

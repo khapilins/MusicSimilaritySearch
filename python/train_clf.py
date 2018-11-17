@@ -4,8 +4,10 @@ import argparse
 from models import get_model
 from data_reader import create_data_reader, get_loader
 from utils import load, save
+from tensorboardX import SummaryWriter
 import json
 import time
+import os
 
 
 def get_args():
@@ -30,7 +32,10 @@ def get_args():
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--test_batch_size', type=int, default=200)
-    parser.add_argument('--n_steps', type=int, default=int(1e6))
+    parser.add_argument('--n_steps', type=int, default=int(1e5) + 1)
+    parser.add_argument('--embeddings_every', type=int, default=10000,
+                        help='Writes embeddings projections on disk every '
+                        'embeddings_every')
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -44,14 +49,35 @@ if __name__ == '__main__':
     model = get_model(model_params['model_type'])(
         **model_params['model_params'])
 
-    (next_element, labels), train_data_init_op, test_data_init_op = (
-        create_data_reader(loader, args.batch_size, args.test_batch_size))
+    train_augmentations, test_augmentations = [], []
+    if loader_params.get('augmentations', None):
+        for aug in loader_params['augmentations']['train']:
+            train_augmentations.append(
+                get_augmentation(aug[0])(**aug[1]))
+        for aug in loader_params['augmentations']['test']:
+            test_augmentations.append(
+                get_augmentation(aug[0])(**aug[1]))
+        augmentations = {'train': train_augmentations,
+                         'test': test_augmentations}
+    else:
+        augmentations = None
+
+    reader, train_data_init_op, test_data_init_op = create_data_reader(
+        loader, args.batch_size, args.test_batch_size,
+        augmentations=augmentations)
+
+    next_element = reader.get('aug_batch', reader['clean_batch'])
+    labels = reader['label']
+    metadata = reader['metadata']
+
     next_element = tf.expand_dims(next_element, axis=2)
 
     model_out = model.create_model(next_element)
 
     writer = tf.summary.FileWriter(args.logdir,
                                    tf.get_default_graph())
+
+    writerX = SummaryWriter(os.path.join(args.logdir, 'projections'))
 
     with tf.name_scope('loss'):
         loss = tf.reduce_mean(
@@ -87,13 +113,15 @@ if __name__ == '__main__':
     for i in range(ckpt_step, args.n_steps):
         try:
             step_start = time.time()
-            loss_, acc_, sums, _ = sess.run([loss, acc, sums_op, opt])
+            loss_, acc_, sums, meta_, emb_, _ = sess.run(
+                [loss, acc, sums_op, metadata, model.dense_out, opt])
             step_time = time.time() - step_start
             print('Step:{}. Elapsed:{:.3f}. Loss: {:.3f}, accuracy: {:.3f}'
                   .format(i, step_time, loss_, acc_))
             if i % args.test_every == 0:
                 sess.run(test_data_init_op)
-                loss_, acc_, sums = sess.run([loss, acc, test_sums_op])
+                loss_, acc_, sums, meta_, emb_ = sess.run(
+                    [loss, acc, test_sums_op, metadata, model.dense_out])
                 print('Test loss: {:3f}, test accuracy: {:3f}'.
                       format(loss_, acc_))
                 writer.add_summary(sums, i)
@@ -102,6 +130,13 @@ if __name__ == '__main__':
                 save(saver, sess, args.logdir, i)
             if i % args.summaries_every == 0:
                 writer.add_summary(sums, i)
+            if i % args.embeddings_every == 0:
+                print('Saving projections')
+                emb_ = np.squeeze(emb_[:, emb_.shape[1]//2])
+                writerX.add_embedding(emb_,
+                                      metadata=meta_,
+                                      global_step=i,
+                                      tag='dense_out')
         except KeyboardInterrupt as e:
             print('Interrupted...')
             save(saver, sess, args.logdir, i)
